@@ -84,11 +84,13 @@ def validate(df: pd.DataFrame) -> ValidationReport:
     return report
 
 def iqr_clip(series):
+    """Clips the IQR of a series"""
     q1, q3 = series.quantile([0.25, 0.75])
     iqr = q3 - q1
     return series.clip(q1 - 3 * iqr, q3 + 3 * iqr)
 
 def clean(df: pd.DataFrame) -> tuple[pd.DataFrame, CleaningReport]:
+    """Cleans the DataFrame --> returns the DataFrame and Cleaning Report"""
     replaced_fps = num_outliers = forward_filled = rows_dropped = 0
     log = []
 
