@@ -44,6 +44,17 @@ def generate_base(seed: int = 42) -> pd.DataFrame:
     df["vram_used_gb"] = rng.normal(10, 2, n)
     df["gpu_util_pct"] = rng.normal(93, 4, n)
 
+    df["gpu_util_pct"] = df["gpu_util_pct"].clip(0, 100)
+    df["vram_used_gb"] = df["vram_used_gb"].clip(0, 24)
+    df["fps"]          = df["fps"].clip(0, None)
+    df["latency_ms"]   = df["latency_ms"].clip(0, None)
+    df["power_w"]      = df["power_w"].clip(0, None)
+    df["temp_c"]       = df["temp_c"].clip(20, 110)
+
+    # print(df["gpu_util_pct"].max())
+    # print(df["fps"].min())
+    # print(df["temp_c"].max())
+
     return df
 
 
