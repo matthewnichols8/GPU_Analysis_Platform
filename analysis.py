@@ -53,15 +53,40 @@ class GpuProfile:
 @dataclass
 class AnomalyStats:
     total_anomalies       : int
-    overlap               : int
-    anomaly_rate_GPU      : float
-    anomaly_rate_workload : float
+    anomaly_rate_GPU      : dict
+    anomaly_rate_workload : dict
     extreme_anomalies     : list
 
 @dataclass
 class AnomalyReport:
-    z_score: AnomalyStats
-    iqr    : AnomalyStats 
+    z_score : AnomalyStats
+    iqr     : AnomalyStats 
+    overlap : int
+
+    def __str__(self):
+        def fmt_dict(d: dict) -> str:
+            return "\n      ".join([f"{k}: {v:.2%}" for k, v in d.items()])
+
+        return (
+            f"  Anomaly Report\n"
+            f"  ══════════════════════════════\n"
+            f"  Z-Score Method:\n"
+            f"      Total Anomalies : {self.z_score.total_anomalies}\n"
+            f"      Anomaly Rate by GPU:\n"
+            f"          {fmt_dict(self.z_score.anomaly_rate_GPU)}\n"
+            f"      Anomaly Rate by Workload:\n"
+            f"          {fmt_dict(self.z_score.anomaly_rate_workload)}\n\n"
+            f"  IQR Method:\n"
+            f"      Total Anomalies : {self.iqr.total_anomalies}\n"
+            f"      Anomaly Rate by GPU:\n"
+            f"          {fmt_dict(self.iqr.anomaly_rate_GPU)}\n"
+            f"      Anomaly Rate by Workload:\n"
+            f"          {fmt_dict(self.iqr.anomaly_rate_workload)}\n\n"
+            f"  Overlap (flagged by both) : {self.overlap}\n"
+            f"  ══════════════════════════════"
+        )
+
+
 
         
 
@@ -121,16 +146,78 @@ def profile_gpu(df : pd.DataFrame, gpu_model : str) -> GpuProfile:
 
     return result
 
+def iqr_flag(series : pd.Series) -> pd.Series:
+    """Used to detect anomalies in IQR"""
+    q1, q3 = series.quantile([0.25, 0.75])
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+    return (series < lower) | (series > upper)
+
 def detect_anomalies(df : pd.DataFrame) -> AnomalyReport:
     """Detects Anomalies from DataFrame"""
+    numeric_cols = ["power_w", "temp_c", "latency_ms", "vram_used_gb", "gpu_util_pct"]
     # Z-Score Methods --> AnomalyStats Object
-
+    z_mask = pd.Series(False, index=df.index)
+    for col in numeric_cols:
+        z = (df[col] - df[col].mean()) / df[col].std()
+        z_mask = z_mask | (z.abs() > 3)
+    z_total_anomalies = z_mask.sum()
+            
     # IQR Methods --> AnomalyStats Object
+    iqr_mask = pd.Series(False, index=df.index)
+    for col in numeric_cols:
+        iqr_mask = iqr_mask | iqr_flag(df[col])
+    i_total_anomalies = iqr_mask.sum()
+
+    # Calculate overlap
+    overlap = (z_mask & iqr_mask).sum()
+
+    # Calculate rates
+    df["z_flagged"] = z_mask
+    df["iqr_flagged"] = iqr_mask
+    z_anomaly_rate_gpu      = df.groupby("gpu_model")["z_flagged"].mean().to_dict()
+    z_anomaly_rate_workload = df.groupby("workload")["z_flagged"].mean().to_dict()
+    i_anomaly_rate_gpu      = df.groupby("gpu_model")["iqr_flagged"].mean().to_dict()
+    i_anomaly_rate_workload = df.groupby("workload")["iqr_flagged"].mean().to_dict()
+
+    # Calculate Z Extremes
+    z_scores = pd.DataFrame(index=df.index)
+    for col in numeric_cols:
+        z_scores[col] = (df[col] - df[col].mean()) / df[col].std()
+    z_scores["combined"] = z_scores.abs().sum(axis=1)
+    z_sorted = z_scores.sort_values("combined", ascending=False)
+    z_extremes = df.loc[z_sorted.head(10).index]
+
+    # IQR extremes
+    iqr_scores = pd.DataFrame(index=df.index)
+    for col in numeric_cols:
+        q1, q3 = df[col].quantile([0.25, 0.75])
+        iqr = q3 - q1
+        iqr_scores[col] = (df[col] - df[col].median()).abs() / (iqr + 1e-9)
+    iqr_scores["combined"] = iqr_scores.abs().sum(axis=1)
+    iqr_extremes = df.loc[iqr_scores.sort_values("combined", ascending=False).head(10).index]
+
+    # Make Anomaly Stats for Z_Score and IQR
+    z_stats = AnomalyStats(
+        total_anomalies=z_total_anomalies,
+        anomaly_rate_GPU=z_anomaly_rate_gpu,
+        anomaly_rate_workload=z_anomaly_rate_workload,
+        extreme_anomalies=z_extremes.to_dict("records")
+    )
+
+    iqr_stats = AnomalyStats(
+        total_anomalies=i_total_anomalies,
+        anomaly_rate_GPU=i_anomaly_rate_gpu,
+        anomaly_rate_workload=i_anomaly_rate_workload,
+        extreme_anomalies=iqr_extremes.to_dict("records")
+    )
 
     # Aggregate result into an Anomaly Report
     result = AnomalyReport(
-        z_score=None, # type: ignore
-        iqr=None # type: ignore
+        z_score=z_stats,
+        iqr=iqr_stats,
+        overlap=overlap
     )
 
     return result
@@ -142,7 +229,9 @@ def main():
     df = generate()
     df, val_report, clean_report = run(df) 
     profile = profile_gpu(df, "RTX 4080")
+    anomaly_report = detect_anomalies(df)
     print(profile) 
+    print(anomaly_report)
 
 if __name__ == "__main__":
     main()
