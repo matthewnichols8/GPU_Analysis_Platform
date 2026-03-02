@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 from dataclasses import dataclass
+from typing import Optional
+import scipy.stats
 
 @dataclass
 class WorkloadStats:
@@ -89,8 +91,20 @@ class AnomalyReport:
 @dataclass
 class RegressionReport:
     p_value        : float
-    driver_verison : str
+    driver_version : Optional[str] # Can be Optional if no regression found
     effect_size    : float
+
+    def __str__(self) -> str:
+        return f"""
+    ----------------------------------------------------------------------------------------
+    Regression Report
+    ══════════════════════════════
+    P-value:        {self.p_value:.2e}
+    Driver Version: {self.driver_version}
+    Effect Size:    {self.effect_size:.4f}
+    ══════════════════════════════
+    ----------------------------------------------------------------------------------------   
+"""
 
 def get_workload_stats(stats : pd.DataFrame, workload_type : str, metric: str) -> WorkloadStats:
     """Calculate the workload stats for a specific workload and metric"""
@@ -224,7 +238,34 @@ def detect_anomalies(df : pd.DataFrame) -> AnomalyReport:
 
     return result
 
-def detect_driver_regression(df : pd.DataFrame) -> RegressionReport
+def detect_driver_regression(df : pd.DataFrame) -> RegressionReport:
+    # ANOVA
+    groups = [group.dropna().values for _, group in df.groupby("driver_version")["fps"]]
+    f_stat, p_value = scipy.stats.f_oneway(*groups)
+
+    # P-Values
+    if p_value < 0.05: # Regression Detected
+        # Effect Size
+        overall_mean = df["fps"].mean()
+        group_means  = df.groupby("driver_version")["fps"].mean()
+        group_counts = df.groupby("driver_version")["fps"].count()
+
+        ss_between = (group_counts * (group_means - overall_mean) ** 2).sum()
+        ss_total   = ((df["fps"] - overall_mean) ** 2).sum()
+        eta_squared = ss_between / ss_total
+        # Assign Driver Version (minimum)
+        driver_version = group_means.idxmin()
+    else:
+        driver_version = None
+        eta_squared = 0.0
+
+    result = RegressionReport(
+        p_value=p_value,
+        driver_version=driver_version, # type: ignore
+        effect_size=eta_squared
+    )
+
+    return result
 
 from data_generator import generate
 from pipeline import run
@@ -234,8 +275,10 @@ def main():
     df, val_report, clean_report = run(df) 
     profile = profile_gpu(df, "RTX 4080")
     anomaly_report = detect_anomalies(df)
+    regression_report = detect_driver_regression(df)
     print(profile) 
     print(anomaly_report)
+    print(regression_report)
 
 if __name__ == "__main__":
     main()
