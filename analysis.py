@@ -49,6 +49,20 @@ class GpuProfile:
         Efficiency: mean={self.compute.efficiency.mean:.4f}
     ----------------------------------------------------------------------------------------
     """
+
+@dataclass
+class AnomalyStats:
+    total_anomalies       : int
+    overlap               : int
+    anomaly_rate_GPU      : float
+    anomaly_rate_workload : float
+    extreme_anomalies     : list
+
+@dataclass
+class AnomalyReport:
+    z_score: AnomalyStats
+    iqr    : AnomalyStats 
+
         
 
 def get_workload_stats(stats : pd.DataFrame, workload_type : str, metric: str) -> WorkloadStats:
@@ -103,6 +117,20 @@ def profile_gpu(df : pd.DataFrame, gpu_model : str) -> GpuProfile:
         compute=compute,
         throttling_rate=throttling_rate,
         peak_efficiency_window=peak_efficiency_window
+    )
+
+    return result
+
+def detect_anomalies(df : pd.DataFrame) -> AnomalyReport:
+    """Detects Anomalies from DataFrame"""
+    # Z-Score Methods --> AnomalyStats Object
+
+    # IQR Methods --> AnomalyStats Object
+
+    # Aggregate result into an Anomaly Report
+    result = AnomalyReport(
+        z_score=None, # type: ignore
+        iqr=None # type: ignore
     )
 
     return result
