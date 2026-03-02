@@ -85,10 +85,12 @@ class AnomalyReport:
             f"  Overlap (flagged by both) : {self.overlap}\n"
             f"  ══════════════════════════════"
         )
-
-
-
-        
+    
+@dataclass
+class RegressionReport:
+    p_value        : float
+    driver_verison : str
+    effect_size    : float
 
 def get_workload_stats(stats : pd.DataFrame, workload_type : str, metric: str) -> WorkloadStats:
     """Calculate the workload stats for a specific workload and metric"""
@@ -221,6 +223,8 @@ def detect_anomalies(df : pd.DataFrame) -> AnomalyReport:
     )
 
     return result
+
+def detect_driver_regression(df : pd.DataFrame) -> RegressionReport
 
 from data_generator import generate
 from pipeline import run
