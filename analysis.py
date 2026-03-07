@@ -105,6 +105,35 @@ class RegressionReport:
     ══════════════════════════════
     ----------------------------------------------------------------------------------------   
 """
+    
+@dataclass
+class ThermalReport:
+    slope             : dict
+    intercept         : dict
+    r_squared         : dict
+    throttle_start    : pd.Timestamp
+    throttle_end      : pd.Timestamp
+    throttle_duration : float
+    mean_fps_drop     : float
+
+    def __str__(self):
+        def fmt_dict(d: dict, precision: str = ".4f") -> str:
+            return "\n      ".join([f"{k}: {v:{precision}}" for k, v in d.items()])
+        return (
+    f"Thermal Report\n"
+    f"══════════════════════════════\n"
+    f"Slope:\n"
+    f"      {fmt_dict(self.slope, '.6f')}\n"
+    f"Intercept:\n"
+    f"      {fmt_dict(self.intercept, '.4f')}\n"
+    f"R Squared:\n"
+    f"      {fmt_dict(self.r_squared, '.2e')}\n"
+    f"Throttle Start:    {self.throttle_start}\n"
+    f"Throttle End:      {self.throttle_end}\n"
+    f"Throttle Duration: {self.throttle_duration:.2f} hours\n"
+    f"Mean FPS Drop:     {self.mean_fps_drop:.2f}\n"
+    f"══════════════════════════════"
+    )
 
 def get_workload_stats(stats : pd.DataFrame, workload_type : str, metric: str) -> WorkloadStats:
     """Calculate the workload stats for a specific workload and metric"""
@@ -135,7 +164,7 @@ def profile_gpu(df : pd.DataFrame, gpu_model : str) -> GpuProfile:
     "temp_c"    : ["mean", "median", "std", lambda x: x.quantile(0.05), lambda x: x.quantile(0.95)],
     "efficiency": ["mean", "median", "std", lambda x: x.quantile(0.05), lambda x: x.quantile(0.95)],
 })
-    stats.columns = pd.MultiIndex.from_tuples([
+    stats.columns = pd.MultiIndex.from_tuples([ # type: ignore
         (col, stat) for col in ["fps", "power_w", "temp_c", "efficiency"]
         for stat in ["mean", "median", "std", "p5", "p95"]
     ])
@@ -147,9 +176,9 @@ def profile_gpu(df : pd.DataFrame, gpu_model : str) -> GpuProfile:
     # mean_efficiency = df["efficiency"].mean()
     
     # Get results
-    gaming = get_metric_profile(stats, "gaming")
-    raytracing = get_metric_profile(stats, "raytracing")
-    compute = get_metric_profile(stats, "compute")
+    gaming = get_metric_profile(stats, "gaming") # type: ignore
+    raytracing = get_metric_profile(stats, "raytracing") # type:ignore
+    compute = get_metric_profile(stats, "compute") # type: ignore
 
     result = GpuProfile(
         gpu_model=gpu_model,
@@ -219,14 +248,14 @@ def detect_anomalies(df : pd.DataFrame) -> AnomalyReport:
         total_anomalies=z_total_anomalies,
         anomaly_rate_GPU=z_anomaly_rate_gpu,
         anomaly_rate_workload=z_anomaly_rate_workload,
-        extreme_anomalies=z_extremes.to_dict("records")
+        extreme_anomalies=z_extremes.to_dict("records") # type: ignore
     )
 
     iqr_stats = AnomalyStats(
         total_anomalies=i_total_anomalies,
         anomaly_rate_GPU=i_anomaly_rate_gpu,
         anomaly_rate_workload=i_anomaly_rate_workload,
-        extreme_anomalies=iqr_extremes.to_dict("records")
+        extreme_anomalies=iqr_extremes.to_dict("records") # type: ignore
     )
 
     # Aggregate result into an Anomaly Report
@@ -267,6 +296,67 @@ def detect_driver_regression(df : pd.DataFrame) -> RegressionReport:
 
     return result
 
+
+def analyse_thermal(df : pd.DataFrame, gpu_model : str) -> ThermalReport:
+    """Analyse the temp_c vs. Power and Throttling Window"""
+    df = df[df["gpu_model"] == gpu_model]
+    # Make dictionaries for slope, intercept, and r_squared
+    slopes, intercepts, r_squareds = {}, {}, {}
+    for workload in df["workload"].unique():
+        group = df[df["workload"] == workload]
+        z = np.polyfit(group["power_w"], group["temp_c"], 1)
+
+        # Obtain slope and intercept
+        slope, intercept = z
+
+        # Calculate r_squared
+        predicted = slope * group["power_w"] + intercept
+        ss_residual = ((group["temp_c"] - predicted) ** 2).sum()
+        ss_total = ((group["temp_c"] - group["temp_c"].mean()) ** 2).sum()
+        r_squared = 1 - (ss_residual / ss_total)
+
+        # Assign Dictionary Values
+        slopes[workload] = slope
+        intercepts[workload] = intercept
+        r_squareds[workload] = r_squared
+
+    # Find Throttle Window
+    # Use a rolling mean to find sustained low fps periods
+    df["fps_rolling"] = df.groupby("workload")["fps"].transform(
+        lambda x: x.rolling(3600, min_periods=1).mean()
+    )
+    # Flag where rolling mean is significantly below overall mean
+    overall_mean = df[df["workload"] == "gaming"]["fps"].mean()
+    sustained_drop = df["fps_rolling"] < (overall_mean * 0.80)
+
+    # Find contiguous groups
+    groups = (sustained_drop != sustained_drop.shift()).cumsum()
+    throttle_groups = df[sustained_drop].groupby(groups)
+    longest = throttle_groups["timestamp"].agg(["min", "max", "count"]).nlargest(1, "count")
+    throttle_start = longest["min"].iloc[0]
+    throttle_end   = longest["max"].iloc[0]
+    throttle_duration = (throttle_end - throttle_start).total_seconds() / 3600
+    # Drop fps_rolling oncce calculated
+    df = df.drop(columns=["fps_rolling"])
+
+    # Mean FPS during Throttle Window
+    mask = (df["timestamp"] >= throttle_start) & (df["timestamp"] < throttle_end)
+    throttle_df = df[mask]
+    mean_fps_drop = df["fps"].mean() - throttle_df["fps"].mean()
+    
+    # Create Thermal Report
+    result = ThermalReport(
+        slope=slopes,
+        intercept=intercepts,
+        r_squared=r_squareds,
+        throttle_start=throttle_start,
+        throttle_end=throttle_end,
+        throttle_duration=throttle_duration,
+        mean_fps_drop=mean_fps_drop
+    )
+
+    return result
+
 from data_generator import generate
 from pipeline import run
 
@@ -276,9 +366,11 @@ def main():
     profile = profile_gpu(df, "RTX 4080")
     anomaly_report = detect_anomalies(df)
     regression_report = detect_driver_regression(df)
+    thermal_report = analyse_thermal(df, "RTX 4080")
     print(profile) 
     print(anomaly_report)
     print(regression_report)
+    print(thermal_report)
 
 if __name__ == "__main__":
     main()
