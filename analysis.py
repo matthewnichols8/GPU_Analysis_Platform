@@ -357,6 +357,13 @@ def analyse_thermal(df : pd.DataFrame, gpu_model : str) -> ThermalReport:
 
     return result
 
+def analyze(df : pd.DataFrame, gpu_model : str):
+    gpu_profile = profile_gpu(df, gpu_model)
+    anomaly_report = detect_anomalies(df)
+    regression_report = detect_driver_regression(df)
+    thermal_report = analyse_thermal(df, gpu_model)
+    return df, gpu_profile, anomaly_report, regression_report, thermal_report
+
 from data_generator import generate
 from pipeline import run
 
