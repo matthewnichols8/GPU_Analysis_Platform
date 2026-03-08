@@ -22,9 +22,15 @@ def generate_base(seed: int = 42) -> pd.DataFrame:
     df = pd.DataFrame({
         "timestamp"      : timestamps,
         "gpu_model"      : rng.choice(gpu_models, n),
-        "driver_version" : rng.choice(driver_versions, n),
         "workload"       : rng.choice(workloads, n),
     })
+    # Assign driver version in weekly blocks
+    days_per_driver = 7
+    df["driver_version"] = pd.cut(
+        df["timestamp"].dt.day,
+        bins=[0, 7, 14, 21, 31],
+        labels=driver_versions
+)
 
     is_gaming = df["workload"] == "gaming"
     is_rt     = df["workload"] == "raytracing"
