@@ -91,6 +91,32 @@ def plot_efficiency_heatmap(df : pd.DataFrame, figsize=(14, 6)) -> None:
     plt.show()
     return None
 
+def plot_distribution_comparison(df: pd.DataFrame, metric: str, figsize=(18, 6)) -> None:
+    """Plots a subplot for each workload"""
+    workloads = ["compute", "gaming", "raytracing"]
+    gpu_models = df["gpu_model"].unique()
+    
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    fig.suptitle(f"{metric} Distribution by Workload", fontsize=14)
+    
+    # Get consistent x range across all subplots
+    x_min = df[metric].min()
+    x_max = df[metric].max()
+    
+    for ax, workload in zip(axes, workloads):
+        workload_df = df[df["workload"] == workload]
+        for gpu in gpu_models:
+            gpu_df = workload_df[workload_df["gpu_model"] == gpu]
+            sns.kdeplot(gpu_df[metric], ax=ax, label=gpu)
+            ax.axvline(gpu_df[metric].median(), linestyle="--", alpha=0.7,
+                       color=sns.color_palette()[list(gpu_models).index(gpu)])
+        ax.set_title(workload)
+        ax.set_xlim(x_min, x_max)
+        ax.legend()
+    
+    plt.tight_layout()
+    plt.show()
+
 from data_generator import generate
 from pipeline import run
 from analysis import analyze
@@ -107,6 +133,7 @@ def main():
     print(thermal_report)
     # plot_annotated_timeseries(df, "RTX 4080", "fps")
     # plot_efficiency_heatmap(df)
+    plot_distribution_comparison(df, "power_w")
     return None
 
 if __name__ == '__main__':
