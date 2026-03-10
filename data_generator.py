@@ -50,6 +50,13 @@ def generate_base(seed: int = 42) -> pd.DataFrame:
     df["vram_used_gb"] = rng.normal(10, 2, n)
     df["gpu_util_pct"] = rng.normal(93, 4, n)
 
+    # Make fps slightly dependent on power_w
+    noise = rng.normal(0, 5, n)
+    df["fps"] = df["fps"] - (df["power_w"] - df["power_w"].mean()) * 0.1 + noise
+
+    # Make temp dependent on power_w  
+    df["temp_c"] = df["temp_c"] + (df["power_w"] - df["power_w"].mean()) * 0.05
+
     df["gpu_util_pct"] = df["gpu_util_pct"].clip(0, 100)
     df["vram_used_gb"] = df["vram_used_gb"].clip(0, 24)
     df["fps"]          = df["fps"].clip(0, None)

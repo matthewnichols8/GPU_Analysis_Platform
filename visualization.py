@@ -117,6 +117,47 @@ def plot_distribution_comparison(df: pd.DataFrame, metric: str, figsize=(18, 6))
     plt.tight_layout()
     plt.show()
 
+def plot_regression_dashboard(df: pd.DataFrame, figsize=(16, 12)) -> None:
+    """Produces a 2x2 grid of scatter plots with regression lines and R²"""
+    
+    def add_regression(ax, x, y, gpu, color):
+        z = np.polyfit(x, y, 1)
+        p = np.poly1d(z)
+        x_sorted = np.linspace(x.min(), x.max(), 100)
+        predicted = p(x)
+        ss_residual = ((y - predicted) ** 2).sum()
+        ss_total    = ((y - y.mean()) ** 2).sum()
+        r_squared   = 1 - (ss_residual / ss_total)
+        ax.plot(x_sorted, p(x_sorted), color=color, linewidth=2)
+        return r_squared
+    
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+
+    colors   = {"RTX 4090": "blue", "RTX 4080": "green", "RTX 4070": "orange"}
+    subplots = [
+        (axes[0,0], "gaming",     "fps",    "Gaming: FPS vs Power"),
+        (axes[0,1], "gaming",     "temp_c", "Gaming: Temp vs Power"),
+        (axes[1,0], "raytracing", "fps",    "Raytracing: FPS vs Power"),
+        (axes[1,1], "raytracing", "temp_c", "Raytracing: Temp vs Power"),
+    ]
+
+    for ax, workload, y_metric, title in subplots:
+        r2_values = []
+        for gpu, color in colors.items():
+            gpu_df = df[(df["workload"] == workload) & (df["gpu_model"] == gpu)]
+            ax.scatter(gpu_df["power_w"], gpu_df[y_metric],
+                       color=color, alpha=0.1, s=1, label=gpu)
+            r2 = add_regression(ax, gpu_df["power_w"], gpu_df[y_metric], gpu, color)
+            r2_values.append(r2)
+        ax.set_title(f"{title} | R²={sum(r2_values)/len(r2_values):.3f}")
+        ax.set_xlabel("power_w")
+        ax.set_ylabel(y_metric)
+        ax.legend(loc="upper right", fontsize=8, markerscale=3)
+
+    fig.suptitle("Regression Dashboard", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
 from data_generator import generate
 from pipeline import run
 from analysis import analyze
@@ -133,7 +174,8 @@ def main():
     print(thermal_report)
     # plot_annotated_timeseries(df, "RTX 4080", "fps")
     # plot_efficiency_heatmap(df)
-    plot_distribution_comparison(df, "power_w")
+    # plot_distribution_comparison(df, "power_w")
+    plot_regression_dashboard(df)
     return None
 
 if __name__ == '__main__':
